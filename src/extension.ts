@@ -124,11 +124,16 @@ function shouldAutoMask(document: vscode.TextDocument) {
 
   const filename = document.fileName.replace(/\\/g, '/');
   const basename = filename.split('/').at(-1) ?? '';
+  if (isExampleFile(basename)) return false;
   if (basename === dotEnvName || basename.startsWith(`${dotEnvName}.`)) return true;
   if (/(secret|credential|token|apikey|api-key|config)/i.test(filename)) return true;
 
   const extraGlobs = vscode.workspace.getConfiguration('streamMasker').get<string[]>('extraAutoMaskGlobs', []);
   return extraGlobs.some((glob) => globMatches(filename, glob));
+}
+
+function isExampleFile(basename: string) {
+  return /\.example(?:\.|$)/i.test(basename);
 }
 
 function globMatches(filename: string, glob: string) {

@@ -5,6 +5,10 @@
   "version": "0.0.1",
   "publisher": "local",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/NA-DEGEN-GIRL/vs-code-sensitive-masking.git"
+  },
   "engines": {
     "vscode": "^1.90.0"
   },
