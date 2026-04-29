@@ -219,7 +219,7 @@ class SecureEditorProvider implements vscode.CustomTextEditorProvider {
 
     webviewPanel.onDidDispose(() => documentChangeSubscription.dispose());
     webviewPanel.webview.onDidReceiveMessage(async (message: { type: string; id?: string; value?: string }) => {
-      if (message.type !== 'replaceValue' || typeof message.id !== 'string' || typeof message.value !== 'string') return;
+      if (typeof message.id !== 'string') return;
 
       const entry = getSensitiveEntries(document).find((candidate) => candidate.id === message.id);
       if (!entry) {
@@ -227,6 +227,18 @@ class SecureEditorProvider implements vscode.CustomTextEditorProvider {
         render();
         return;
       }
+
+      if (message.type === 'revealValue') {
+        await webviewPanel.webview.postMessage({
+          type: 'revealedValue',
+          id: message.id,
+          value: getDisplayValue(document, entry),
+        });
+        await webviewPanel.webview.postMessage({ type: 'status', text: 'Value revealed on screen.' });
+        return;
+      }
+
+      if (message.type !== 'replaceValue' || typeof message.value !== 'string') return;
 
       const edit = new vscode.WorkspaceEdit();
       edit.replace(
@@ -367,10 +379,10 @@ function getSecureEditorHtml(document: vscode.TextDocument, webview: vscode.Webv
 
     form {
       display: grid;
-      grid-template-columns: minmax(120px, 220px) minmax(160px, 280px) auto;
+      grid-template-columns: minmax(120px, 220px) minmax(160px, 280px) auto auto;
       align-items: center;
       gap: 8px;
-      max-width: 720px;
+      max-width: 880px;
     }
 
     label {
@@ -403,6 +415,31 @@ function getSecureEditorHtml(document: vscode.TextDocument, webview: vscode.Webv
     button:hover {
       background: var(--vscode-button-hoverBackground);
     }
+
+    button.secondary {
+      background: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+    }
+
+    button.secondary:hover {
+      background: var(--vscode-button-secondaryHoverBackground);
+    }
+
+    .revealed {
+      grid-column: 2 / 5;
+      display: none;
+      min-width: 0;
+      margin: 0;
+      padding: 3px 0 8px;
+      overflow-x: auto;
+      color: var(--vscode-editorWarning-foreground);
+      font-family: var(--vscode-editor-font-family);
+      white-space: pre;
+    }
+
+    .revealed.visible {
+      display: block;
+    }
   </style>
 </head>
 <body>
@@ -427,8 +464,43 @@ function getSecureEditorHtml(document: vscode.TextDocument, webview: vscode.Webv
       input.value = '';
     });
 
+    document.addEventListener('click', (event) => {
+      const button = event.target.closest('button');
+      if (!button || !button.classList.contains('reveal')) return;
+
+      const form = button.closest('form');
+      const output = form.querySelector('.revealed');
+      if (output.classList.contains('visible')) {
+        output.textContent = '';
+        output.classList.remove('visible');
+        button.setAttribute('aria-label', 'Reveal current value');
+        button.title = 'Reveal current value';
+        return;
+      }
+
+      vscode.postMessage({
+        type: 'revealValue',
+        id: form.dataset.id,
+      });
+    });
+
     window.addEventListener('message', (event) => {
-      if (event.data?.type === 'status') status.textContent = event.data.text;
+      if (event.data?.type === 'status') {
+        status.textContent = event.data.text;
+        return;
+      }
+
+      if (event.data?.type === 'revealedValue') {
+        const form = document.querySelector(\`form[data-id="\${CSS.escape(event.data.id)}"]\`);
+        const output = form?.querySelector('.revealed');
+        const button = form?.querySelector('.reveal');
+        if (!output || !button) return;
+
+        output.textContent = event.data.value;
+        output.classList.add('visible');
+        button.setAttribute('aria-label', 'Hide current value');
+        button.title = 'Hide current value';
+      }
     });
   </script>
 </body>
@@ -485,6 +557,8 @@ function getEntryEditorHtml(entry: SensitiveEntry) {
       <label title="${label}">${label}</label>
       <input type="password" autocomplete="off" spellcheck="false" placeholder="New value">
       <button type="submit">Apply</button>
+      <button class="secondary reveal" type="button" title="Reveal current value" aria-label="Reveal current value">&#128065;</button>
+      <pre class="revealed" aria-live="polite"></pre>
     </form>
   `;
 }
@@ -513,6 +587,24 @@ function formatReplacementValue(value: string, quoteStyle: QuoteStyle) {
   if (quoteStyle === 'json-string' || quoteStyle === 'double') return JSON.stringify(value);
   if (quoteStyle === 'single') return `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
   return value;
+}
+
+function getDisplayValue(document: vscode.TextDocument, entry: SensitiveEntry) {
+  const rawValue = document.lineAt(entry.line).text.slice(entry.start, entry.end).trim();
+  if (entry.quoteStyle === 'json-string') {
+    try {
+      return JSON.parse(rawValue) as string;
+    } catch {
+      return rawValue;
+    }
+  }
+  if (entry.quoteStyle === 'double' && rawValue.startsWith('"') && rawValue.endsWith('"')) {
+    return rawValue.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+  }
+  if (entry.quoteStyle === 'single' && rawValue.startsWith("'") && rawValue.endsWith("'")) {
+    return rawValue.slice(1, -1).replace(/\\'/g, "'").replace(/\\\\/g, '\\');
+  }
+  return rawValue;
 }
 
 function escapeHtml(value: string) {
