@@ -19,7 +19,8 @@
     "onStartupFinished",
     "onCommand:streamMasker.toggleCurrentFile",
     "onCommand:streamMasker.maskCurrentFile",
-    "onCommand:streamMasker.unmaskCurrentFile"
+    "onCommand:streamMasker.unmaskCurrentFile",
+    "onCommand:streamMasker.openMaskedPreview"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -36,6 +37,11 @@
       {
         "command": "streamMasker.unmaskCurrentFile",
         "title": "Stream Masker: Unmask Current File"
+      },
+      {
+        "command": "streamMasker.openMaskedPreview",
+        "title": "Stream Masker: Open Masked Preview",
+        "icon": "$(preview)"
       }
     ],
     "menus": {
@@ -44,11 +50,21 @@
           "command": "streamMasker.toggleCurrentFile",
           "group": "navigation",
           "when": "editorTextFocus"
+        },
+        {
+          "command": "streamMasker.openMaskedPreview",
+          "group": "navigation",
+          "when": "editorTextFocus"
         }
       ],
       "editor/context": [
         {
           "command": "streamMasker.toggleCurrentFile",
+          "group": "navigation",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "streamMasker.openMaskedPreview",
           "group": "navigation",
           "when": "editorTextFocus"
         }
@@ -60,6 +76,10 @@
         },
         {
           "command": "streamMasker.unmaskCurrentFile",
+          "group": "navigation"
+        },
+        {
+          "command": "streamMasker.openMaskedPreview",
           "group": "navigation"
         }
       ]

@@ -3,11 +3,14 @@ import * as vscode from 'vscode';
 const manualMaskUris = new Set<string>();
 const manualUnmaskUris = new Set<string>();
 const dotEnvName = `.${'env'}`;
+const previewScheme = 'stream-masker-preview';
 
 let decorationType: vscode.TextEditorDecorationType;
 let statusBarItem: vscode.StatusBarItem;
+let previewProvider: MaskedPreviewProvider;
 
 export function activate(context: vscode.ExtensionContext) {
+  previewProvider = new MaskedPreviewProvider();
   decorationType = vscode.window.createTextEditorDecorationType({
     color: 'transparent',
     backgroundColor: new vscode.ThemeColor('editor.background'),
@@ -22,14 +25,22 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(decorationType, statusBarItem);
 
   context.subscriptions.push(
+    vscode.workspace.registerTextDocumentContentProvider(previewScheme, previewProvider),
     vscode.commands.registerCommand('streamMasker.toggleCurrentFile', toggleCurrentFile),
     vscode.commands.registerCommand('streamMasker.maskCurrentFile', (uri?: vscode.Uri) => setManualMask(uri, true)),
     vscode.commands.registerCommand('streamMasker.unmaskCurrentFile', (uri?: vscode.Uri) => setManualMask(uri, false)),
+    vscode.commands.registerCommand('streamMasker.openMaskedPreview', openMaskedPreview),
     vscode.window.onDidChangeActiveTextEditor(updateAllEditors),
-    vscode.workspace.onDidChangeTextDocument((event) => updateEditorForDocument(event.document)),
+    vscode.workspace.onDidChangeTextDocument((event) => {
+      updateEditorForDocument(event.document);
+      previewProvider.refresh(event.document);
+    }),
     vscode.workspace.onDidOpenTextDocument((document) => updateEditorForDocument(document)),
     vscode.workspace.onDidChangeConfiguration((event) => {
-      if (event.affectsConfiguration('streamMasker')) updateAllEditors();
+      if (event.affectsConfiguration('streamMasker')) {
+        updateAllEditors();
+        previewProvider.refreshAll();
+      }
     }),
   );
 
@@ -71,6 +82,19 @@ function setManualMask(uri: vscode.Uri | undefined, masked: boolean) {
   updateAllEditors();
 }
 
+async function openMaskedPreview(uri?: vscode.Uri) {
+  const targetUri = uri ?? vscode.window.activeTextEditor?.document.uri;
+  if (!targetUri || targetUri.scheme === previewScheme) return;
+
+  const sourceDocument = await vscode.workspace.openTextDocument(targetUri);
+  const previewUri = previewProvider.getPreviewUri(sourceDocument.uri);
+  const previewDocument = await vscode.workspace.openTextDocument(previewUri);
+  await vscode.window.showTextDocument(previewDocument, {
+    preview: false,
+    viewColumn: vscode.ViewColumn.Beside,
+  });
+}
+
 function updateAllEditors() {
   for (const editor of vscode.window.visibleTextEditors) {
     updateEditor(editor);
@@ -104,6 +128,60 @@ function updateEditor(editor: vscode.TextEditor) {
   }));
 
   editor.setDecorations(decorationType, decorations);
+}
+
+class MaskedPreviewProvider implements vscode.TextDocumentContentProvider {
+  private readonly changeEmitter = new vscode.EventEmitter<vscode.Uri>();
+  private readonly previewUrisBySource = new Map<string, vscode.Uri>();
+
+  readonly onDidChange = this.changeEmitter.event;
+
+  getPreviewUri(sourceUri: vscode.Uri) {
+    const key = sourceUri.toString();
+    const existingUri = this.previewUrisBySource.get(key);
+    if (existingUri) return existingUri;
+
+    const basename = sourceUri.path.split('/').at(-1) || 'masked';
+    const previewUri = vscode.Uri.from({
+      scheme: previewScheme,
+      authority: 'preview',
+      path: `/${basename}.masked`,
+      query: encodeURIComponent(key),
+    });
+    this.previewUrisBySource.set(key, previewUri);
+    return previewUri;
+  }
+
+  async provideTextDocumentContent(uri: vscode.Uri) {
+    const sourceUri = vscode.Uri.parse(decodeURIComponent(uri.query));
+    const sourceDocument = await vscode.workspace.openTextDocument(sourceUri);
+    return getMaskedDocumentText(sourceDocument);
+  }
+
+  refresh(document: vscode.TextDocument) {
+    const previewUri = this.previewUrisBySource.get(document.uri.toString());
+    if (previewUri) this.changeEmitter.fire(previewUri);
+  }
+
+  refreshAll() {
+    for (const previewUri of this.previewUrisBySource.values()) {
+      this.changeEmitter.fire(previewUri);
+    }
+  }
+}
+
+function getMaskedDocumentText(document: vscode.TextDocument) {
+  const mask = vscode.workspace.getConfiguration('streamMasker').get<string>('mask', '********');
+  const ranges = findSensitiveRanges(document).sort((first, second) => document.offsetAt(second.start) - document.offsetAt(first.start));
+  let text = document.getText();
+
+  for (const range of ranges) {
+    const start = document.offsetAt(range.start);
+    const end = document.offsetAt(range.end);
+    text = `${text.slice(0, start)}${mask}${text.slice(end)}`;
+  }
+
+  return text;
 }
 
 function updateStatusBar() {
