@@ -1,4 +1,5 @@
 .codex
+CODEX.md
 .git/**
 .gitignore
 .vscode/**

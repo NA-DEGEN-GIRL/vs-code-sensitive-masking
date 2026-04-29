@@ -691,9 +691,8 @@ function findKeyValueRange(line: string, lineIndex: number) {
   const valueStart = equalsIndex + 1;
   const commentStart = findUnquotedComment(line, valueStart);
   const valueEnd = trimRightIndex(line, commentStart >= 0 ? commentStart : line.length);
-  if (valueEnd <= valueStart) return undefined;
 
-  return new vscode.Range(lineIndex, valueStart, lineIndex, valueEnd);
+  return new vscode.Range(lineIndex, valueStart, lineIndex, Math.max(valueStart, valueEnd));
 }
 
 function findJsonValueRanges(line: string, lineIndex: number) {
