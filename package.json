@@ -1,0 +1,89 @@
+{
+  "name": "vscode-stream-masker",
+  "displayName": "Stream Masker",
+  "description": "Visually masks sensitive-looking values in VS Code editors while preserving real edit, copy, paste, and save behavior.",
+  "version": "0.0.1",
+  "publisher": "local",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:streamMasker.toggleCurrentFile",
+    "onCommand:streamMasker.maskCurrentFile",
+    "onCommand:streamMasker.unmaskCurrentFile"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "streamMasker.toggleCurrentFile",
+        "title": "Stream Masker: Toggle Current File Masking",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "streamMasker.maskCurrentFile",
+        "title": "Stream Masker: Mask Current File"
+      },
+      {
+        "command": "streamMasker.unmaskCurrentFile",
+        "title": "Stream Masker: Unmask Current File"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "streamMasker.toggleCurrentFile",
+          "group": "navigation",
+          "when": "editorTextFocus"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "streamMasker.toggleCurrentFile",
+          "group": "navigation",
+          "when": "editorTextFocus"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "streamMasker.maskCurrentFile",
+          "group": "navigation"
+        },
+        {
+          "command": "streamMasker.unmaskCurrentFile",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Stream Masker",
+      "properties": {
+        "streamMasker.extraAutoMaskGlobs": {
+          "type": "array",
+          "default": [],
+          "description": "Additional glob patterns that should be visually masked automatically."
+        },
+        "streamMasker.mask": {
+          "type": "string",
+          "default": "********",
+          "description": "Text drawn over sensitive-looking values in the editor."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.90.0",
+    "typescript": "^5.9.3"
+  }
+}
