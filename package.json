@@ -1,7 +1,7 @@
 {
   "name": "vscode-stream-masker",
   "displayName": "Stream Masker",
-  "description": "Visually masks sensitive-looking values in VS Code editors while preserving real edit, copy, paste, and save behavior.",
+  "description": "Masks sensitive-looking values in VS Code and provides a secure editor for replacing values without rendering originals.",
   "version": "0.0.1",
   "publisher": "local",
   "license": "MIT",
@@ -20,7 +20,9 @@
     "onCommand:streamMasker.toggleCurrentFile",
     "onCommand:streamMasker.maskCurrentFile",
     "onCommand:streamMasker.unmaskCurrentFile",
-    "onCommand:streamMasker.openMaskedPreview"
+    "onCommand:streamMasker.openMaskedPreview",
+    "onCommand:streamMasker.openSecureEditor",
+    "onCustomEditor:streamMasker.secureEditor"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -42,6 +44,65 @@
         "command": "streamMasker.openMaskedPreview",
         "title": "Stream Masker: Open Masked Preview",
         "icon": "$(preview)"
+      },
+      {
+        "command": "streamMasker.openSecureEditor",
+        "title": "Stream Masker: Open Secure Editor",
+        "icon": "$(lock)"
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "streamMasker.secureEditor",
+        "displayName": "Stream Masker Secure Editor",
+        "selector": [
+          {
+            "filenamePattern": "**/.[e]nv"
+          },
+          {
+            "filenamePattern": "**/.[e]nv.local"
+          },
+          {
+            "filenamePattern": "**/.[e]nv.development"
+          },
+          {
+            "filenamePattern": "**/.[e]nv.development.local"
+          },
+          {
+            "filenamePattern": "**/.[e]nv.production"
+          },
+          {
+            "filenamePattern": "**/.[e]nv.production.local"
+          },
+          {
+            "filenamePattern": "**/.[e]nv.test"
+          },
+          {
+            "filenamePattern": "**/.[e]nv.test.local"
+          },
+          {
+            "filenamePattern": "**/*secret*"
+          },
+          {
+            "filenamePattern": "**/*credential*"
+          },
+          {
+            "filenamePattern": "**/*token*"
+          },
+          {
+            "filenamePattern": "**/*apikey*"
+          },
+          {
+            "filenamePattern": "**/*api-key*"
+          },
+          {
+            "filenamePattern": "**/*private*"
+          },
+          {
+            "filenamePattern": "**/local.settings.json"
+          }
+        ],
+        "priority": "default"
       }
     ],
     "menus": {
@@ -55,6 +116,11 @@
           "command": "streamMasker.openMaskedPreview",
           "group": "navigation",
           "when": "editorTextFocus"
+        },
+        {
+          "command": "streamMasker.openSecureEditor",
+          "group": "navigation",
+          "when": "editorTextFocus"
         }
       ],
       "editor/context": [
@@ -65,6 +131,11 @@
         },
         {
           "command": "streamMasker.openMaskedPreview",
+          "group": "navigation",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "streamMasker.openSecureEditor",
           "group": "navigation",
           "when": "editorTextFocus"
         }
@@ -80,6 +151,10 @@
         },
         {
           "command": "streamMasker.openMaskedPreview",
+          "group": "navigation"
+        },
+        {
+          "command": "streamMasker.openSecureEditor",
           "group": "navigation"
         }
       ]
