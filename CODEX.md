@@ -29,7 +29,7 @@ Developer: Reload Window
 
 - The decoration-based masking mode is convenient but cannot guarantee zero-frame secrecy while editing in the default text editor.
 - The Secure Editor is the safer editing path. It should not send original values to the Webview unless the user explicitly clicks the reveal button.
-- The Secure Editor edits values by replacing the detected value range. It intentionally does not prefill inputs with existing secrets.
+- The Secure Editor edits existing values by replacing the detected value range and can add new key/value entries. It intentionally does not prefill inputs with existing secrets.
 - Empty key-value entries such as `KEY=` must still produce an editable Secure Editor row.
 - Files containing `.example` should remain outside default automatic masking behavior unless explicitly opened or masked by the user.
 

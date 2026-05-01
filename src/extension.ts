@@ -218,7 +218,24 @@ class SecureEditorProvider implements vscode.CustomTextEditorProvider {
     });
 
     webviewPanel.onDidDispose(() => documentChangeSubscription.dispose());
-    webviewPanel.webview.onDidReceiveMessage(async (message: { type: string; id?: string; value?: string }) => {
+    webviewPanel.webview.onDidReceiveMessage(async (message: { type: string; id?: string; key?: string; value?: string }) => {
+      if (message.type === 'addEntry') {
+        if (typeof message.key !== 'string' || typeof message.value !== 'string') return;
+
+        const result = createAddEntryEdit(document, message.key, message.value);
+        if ('error' in result) {
+          await webviewPanel.webview.postMessage({ type: 'status', text: result.error });
+          return;
+        }
+
+        const applied = await vscode.workspace.applyEdit(result.edit);
+        await webviewPanel.webview.postMessage({
+          type: 'status',
+          text: applied ? 'Added. Save the file to persist changes.' : 'Add failed.',
+        });
+        return;
+      }
+
       if (typeof message.id !== 'string') return;
 
       const entry = getSensitiveEntries(document).find((candidate) => candidate.id === message.id);
@@ -352,6 +369,12 @@ function getSecureEditorHtml(document: vscode.TextDocument, webview: vscode.Webv
       padding: 0 14px;
     }
 
+    .add-entry {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--vscode-editorWidget-border);
+      background: var(--vscode-editor-background);
+    }
+
     .line-number {
       padding: 3px 12px 3px 0;
       color: var(--vscode-editorLineNumber-foreground);
@@ -440,6 +463,22 @@ function getSecureEditorHtml(document: vscode.TextDocument, webview: vscode.Webv
     .revealed.visible {
       display: block;
     }
+
+    .add-entry form {
+      grid-template-columns: minmax(120px, 220px) minmax(160px, 280px) minmax(160px, 280px) auto;
+    }
+
+    @media (max-width: 640px) {
+      form,
+      .add-entry form {
+        grid-template-columns: minmax(0, 1fr);
+        align-items: stretch;
+      }
+
+      .revealed {
+        grid-column: 1;
+      }
+    }
   </style>
 </head>
 <body>
@@ -447,6 +486,14 @@ function getSecureEditorHtml(document: vscode.TextDocument, webview: vscode.Webv
     <div class="title">${filename}</div>
     <div id="status">${entries.length} masked value${entries.length === 1 ? '' : 's'}</div>
   </header>
+  <section class="add-entry">
+    <form data-action="add-entry">
+      <label for="new-entry-key">New item</label>
+      <input id="new-entry-key" name="key" type="text" autocomplete="off" spellcheck="false" placeholder="Key">
+      <input name="value" type="password" autocomplete="off" spellcheck="false" placeholder="Value">
+      <button type="submit">Add</button>
+    </form>
+  </section>
   <main>${rows.join('')}</main>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
@@ -455,7 +502,24 @@ function getSecureEditorHtml(document: vscode.TextDocument, webview: vscode.Webv
     document.addEventListener('submit', (event) => {
       event.preventDefault();
       const form = event.target;
-      const input = form.querySelector('input');
+      if (form.dataset.action === 'add-entry') {
+        const keyInput = form.querySelector('input[name="key"]');
+        const valueInput = form.querySelector('input[name="value"]');
+        const key = keyInput.value.trim();
+        if (!key) {
+          status.textContent = 'Enter a key.';
+          return;
+        }
+
+        vscode.postMessage({
+          type: 'addEntry',
+          key,
+          value: valueInput.value,
+        });
+        return;
+      }
+
+      const input = form.querySelector('input[name="value"]');
       vscode.postMessage({
         type: 'replaceValue',
         id: form.dataset.id,
@@ -553,14 +617,178 @@ function getMaskedLineText(line: string, entries: SensitiveEntry[]) {
 function getEntryEditorHtml(entry: SensitiveEntry) {
   const label = escapeHtml(entry.label);
   return `
-    <form data-id="${escapeHtml(entry.id)}">
+    <form data-action="replace-value" data-id="${escapeHtml(entry.id)}">
       <label title="${label}">${label}</label>
-      <input type="password" autocomplete="off" spellcheck="false" placeholder="New value">
+      <input name="value" type="password" autocomplete="off" spellcheck="false" placeholder="New value">
       <button type="submit">Apply</button>
       <button class="secondary reveal" type="button" title="Reveal current value" aria-label="Reveal current value">&#128065;</button>
       <pre class="revealed" aria-live="polite"></pre>
     </form>
   `;
+}
+
+type AddEntryEditResult = { edit: vscode.WorkspaceEdit } | { error: string };
+
+function createAddEntryEdit(document: vscode.TextDocument, key: string, value: string): AddEntryEditResult {
+  const normalizedKey = key.trim();
+  if (!normalizedKey) return { error: 'Enter a key.' };
+  if (/[\r\n]/.test(normalizedKey) || /[\r\n]/.test(value)) {
+    return { error: 'New entries must be single-line values.' };
+  }
+
+  if (isJsonDocument(document)) return createJsonAddEntryEdit(document, normalizedKey, value);
+  return createKeyValueAddEntryEdit(document, normalizedKey, value);
+}
+
+function createKeyValueAddEntryEdit(document: vscode.TextDocument, key: string, value: string): AddEntryEditResult {
+  if (!/^[^\s=]+$/.test(key)) return { error: 'Keys cannot contain whitespace or =.' };
+  if (hasKeyValueKey(document, key)) return { error: 'A matching key already exists.' };
+
+  const edit = new vscode.WorkspaceEdit();
+  const text = document.getText();
+  const eol = getDocumentEol(document);
+  const entryLine = `${key}=${formatKeyValueValue(value)}`;
+  const endsWithLineBreak = text.endsWith('\n');
+  const lastLine = document.lineAt(document.lineCount - 1);
+  const position = new vscode.Position(document.lineCount - 1, lastLine.text.length);
+  const prefix = text.length > 0 && !endsWithLineBreak ? eol : '';
+  const suffix = endsWithLineBreak ? eol : '';
+
+  edit.insert(document.uri, position, `${prefix}${entryLine}${suffix}`);
+  return { edit };
+}
+
+function createJsonAddEntryEdit(document: vscode.TextDocument, key: string, value: string): AddEntryEditResult {
+  if (documentContainsJsonKey(document.getText(), key)) return { error: 'A matching JSON key already exists.' };
+
+  const text = document.getText();
+  const objectRange = findTopLevelJsonObject(text);
+  if (!objectRange) return { error: 'Add is supported for JSON files with a root object.' };
+
+  const edit = new vscode.WorkspaceEdit();
+  const eol = getDocumentEol(document);
+  const closePosition = document.positionAt(objectRange.close);
+  const openPosition = document.positionAt(objectRange.open);
+  const closeLineText = document.lineAt(closePosition.line).text;
+  const closeLinePrefix = closeLineText.slice(0, closePosition.character);
+  const closeIsOnOwnLine = closePosition.line > openPosition.line && closeLinePrefix.trim().length === 0;
+  const baseIndent = getLineIndent(closeLineText);
+  const propertyIndent = detectJsonPropertyIndent(document, openPosition.line, closePosition.line, baseIndent);
+  const property = `${JSON.stringify(key)}: ${JSON.stringify(value)}`;
+  const hasEntries = text.slice(objectRange.open + 1, objectRange.close).trim().length > 0;
+  const previousSignificantOffset = findPreviousSignificantOffset(text, objectRange.close);
+  const needsComma = hasEntries && previousSignificantOffset >= 0 && text[previousSignificantOffset] !== ',';
+
+  if (closeIsOnOwnLine) {
+    if (needsComma) edit.insert(document.uri, document.positionAt(previousSignificantOffset + 1), ',');
+    edit.insert(document.uri, new vscode.Position(closePosition.line, 0), `${propertyIndent}${property}${eol}`);
+  } else if (hasEntries) {
+    edit.insert(document.uri, closePosition, `${needsComma ? ',' : ''} ${property}`);
+  } else {
+    edit.insert(document.uri, closePosition, `${eol}${propertyIndent}${property}${eol}${baseIndent}`);
+  }
+
+  return { edit };
+}
+
+function hasKeyValueKey(document: vscode.TextDocument, key: string) {
+  for (let lineIndex = 0; lineIndex < document.lineCount; lineIndex += 1) {
+    const line = document.lineAt(lineIndex).text;
+    const match = line.match(/^\s*([^=\s]+)\s*=/);
+    if (match?.[1] === key) return true;
+  }
+  return false;
+}
+
+function documentContainsJsonKey(text: string, key: string) {
+  return new RegExp(`${escapeRegExp(JSON.stringify(key))}\\s*:`).test(text);
+}
+
+function findTopLevelJsonObject(text: string) {
+  const open = text.search(/\S/);
+  if (open < 0 || text[open] !== '{') return undefined;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = open; index < text.length; index += 1) {
+    const character = text[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === '\\') {
+        escaped = true;
+      } else if (character === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (character === '"') {
+      inString = true;
+    } else if (character === '{') {
+      depth += 1;
+    } else if (character === '}') {
+      depth -= 1;
+      if (depth === 0) return { open, close: index };
+    }
+  }
+
+  return undefined;
+}
+
+function findPreviousSignificantOffset(text: string, offset: number) {
+  let cursor = offset - 1;
+  while (cursor >= 0 && /\s/.test(text[cursor])) cursor -= 1;
+  return cursor;
+}
+
+function detectJsonPropertyIndent(document: vscode.TextDocument, openLine: number, closeLine: number, baseIndent: string) {
+  for (let lineIndex = openLine + 1; lineIndex < closeLine; lineIndex += 1) {
+    const line = document.lineAt(lineIndex).text;
+    if (!line.trim()) continue;
+    const indent = getLineIndent(line);
+    if (indent.length > baseIndent.length) return indent;
+  }
+  return `${baseIndent}${detectIndentUnit(document)}`;
+}
+
+function detectIndentUnit(document: vscode.TextDocument) {
+  for (let lineIndex = 0; lineIndex < document.lineCount; lineIndex += 1) {
+    const match = document.lineAt(lineIndex).text.match(/^(\s+)\S/);
+    if (!match) continue;
+    if (match[1].includes('\t')) return '\t';
+    return ' '.repeat(Math.min(match[1].length, 4));
+  }
+  return '  ';
+}
+
+function formatKeyValueValue(value: string) {
+  if (!value) return '';
+  if (/[\s#"'\\]/.test(value)) return JSON.stringify(value);
+  return value;
+}
+
+function isJsonDocument(document: vscode.TextDocument) {
+  const filename = document.fileName.toLowerCase();
+  return (
+    document.languageId === 'json' ||
+    document.languageId === 'jsonc' ||
+    filename.endsWith('.json') ||
+    filename.endsWith('.jsonc')
+  );
+}
+
+function getDocumentEol(document: vscode.TextDocument) {
+  return document.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n';
+}
+
+function getLineIndent(line: string) {
+  return line.match(/^\s*/)?.[0] ?? '';
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function getSensitiveEntryLabel(line: string, valueStart: number) {
@@ -575,7 +803,7 @@ function getSensitiveEntryLabel(line: string, valueStart: number) {
 }
 
 function getQuoteStyle(document: vscode.TextDocument, range: vscode.Range, rawValue: string): QuoteStyle {
-  if ((document.languageId === 'json' || document.fileName.toLowerCase().endsWith('.json')) && rawValue.startsWith('"')) {
+  if (isJsonDocument(document) && rawValue.startsWith('"')) {
     return 'json-string';
   }
   if (rawValue.startsWith('"')) return 'double';
@@ -666,7 +894,7 @@ function globMatches(filename: string, glob: string) {
 
 function findSensitiveRanges(document: vscode.TextDocument) {
   const ranges: vscode.Range[] = [];
-  const isJson = document.languageId === 'json' || document.fileName.toLowerCase().endsWith('.json');
+  const isJson = isJsonDocument(document);
 
   for (let lineIndex = 0; lineIndex < document.lineCount; lineIndex += 1) {
     const line = document.lineAt(lineIndex).text;
